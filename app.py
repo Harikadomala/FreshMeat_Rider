@@ -1,5 +1,3 @@
-
-
 from flask import Flask, render_template, redirect, url_for, request, flash, session
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -16,8 +14,6 @@ def get_db_connection():
         password=os.getenv("DB_PASSWORD"),
         database=os.getenv("DB_NAME")
     )
-
-
 
 
 def create_tables():
@@ -234,6 +230,7 @@ def admin_required(func):
 
 # ---------------- HOME ----------------
 
+
 @app.route("/")
 def home():
 
@@ -241,12 +238,16 @@ def home():
 
     if rider:
 
+        if rider["status"] != "Approved":
+            return redirect(url_for("rider_status"))
+
         if not rider.get("verification_submitted", False):
             return redirect(url_for("rider_verification"))
 
         return redirect(url_for("rider_dashboard"))
 
     return redirect(url_for("login"))
+
 
 
 # ---------------- RIDER REGISTRATION ----------------
@@ -331,7 +332,7 @@ def register():
             """, (
                 name, phone, email, address,
                 vehicle, license_number,
-                username, password_hash, "Approved"
+                username, password_hash, "Pending"
             ))
 
             connection.commit()
@@ -355,6 +356,7 @@ def register():
 
 # ---------------- RIDER LOGIN ----------------
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
 
@@ -367,7 +369,6 @@ def login():
         cursor = connection.cursor(dictionary=True)
 
         try:
-            # Find rider in MySQL
             cursor.execute(
                 "SELECT * FROM riders WHERE username = %s",
                 (username,)
@@ -375,20 +376,32 @@ def login():
 
             rider = cursor.fetchone()
 
-            if rider and check_password_hash(rider["password_hash"], password):
+            # Check whether username exists
+            if not rider:
+                flash("Username not found. Please register first.", "error")
+                return redirect(url_for("login"))
 
-                session["rider_username"] = username
+            # Check password
+            if not check_password_hash(rider["password_hash"], password):
+                flash("Invalid password. Please try again.", "error")
+                return redirect(url_for("login"))
 
-                flash("Login successful!", "success")
+            # Login successful
+            session["rider_username"] = username
 
-                # First login: go to camera verification
-                if not rider["verification_submitted"]:
-                    return redirect(url_for("rider_verification"))
+            # Check Admin approval
+            if rider["status"] == "Rejected":
+                return redirect(url_for("rider_status"))
 
-                # Already verified: go to dashboard
-                return redirect(url_for("rider_dashboard"))
+            if rider["status"] != "Approved":
+                return redirect(url_for("rider_status"))
 
-            flash("Invalid username or password.", "error")
+            # Check document verification
+            if not rider["verification_submitted"]:
+                return redirect(url_for("rider_verification"))
+
+            flash("Login successful!", "success")
+            return redirect(url_for("rider_dashboard"))
 
         except mysql.connector.Error as err:
             print("Login database error:", err)
@@ -399,8 +412,6 @@ def login():
             connection.close()
 
     return render_template("login.html")
-
-
 
 
 # ---------------- RIDER VERIFICATION ----------------
@@ -527,9 +538,12 @@ def rider_verification():
 @app.route("/rider-status")
 @login_required
 def rider_status():
+    rider = current_rider()
 
-    # Existing demo status behavior
-    return redirect(url_for("rider_dashboard"))
+    if not rider:
+        return redirect(url_for("login"))
+
+    return render_template("rider_status.html", rider=rider)
 
 
 # ---------------- RIDER LOGOUT ----------------
@@ -575,70 +589,179 @@ def admin_logout():
 
 # ---------------- ADMIN DASHBOARD ----------------
 
+
 @app.route("/admin")
 @admin_required
 def admin_dashboard():
 
-    all_riders = list(riders.values())
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
 
-    pending_riders = [
-        r for r in all_riders if r["status"] == "Pending"
-    ]
+    try:
+        cursor.execute("""
+            SELECT
+                r.rider_id AS id,
+                r.full_name AS name,
+                r.phone,
+                r.email,
+                r.address,
+                r.vehicle_number AS vehicle,
+                r.licence_number AS license,
+                r.username,
+                r.status,
+                r.verification_submitted,
+                r.created_at,
 
-    return render_template(
-        "admin_dashboard.html",
-        orders=orders,
-        rider=all_riders[0] if all_riders else {},
-        riders=all_riders,
-        pending_riders=pending_riders
-    )
+                d.rider_photo,
+                d.license_front,
+                d.license_back,
+                d.rc_front,
+                d.rc_back,
+                d.vehicle_photo
+
+            FROM riders r
+
+            LEFT JOIN rider_documents d
+                ON r.rider_id = d.rider_id
+
+            ORDER BY r.created_at DESC
+        """)
+
+        all_riders = cursor.fetchall()
+
+        # Keep the same document structure used by the templates
+        for rider in all_riders:
+            rider["documents"] = {
+                "rider_photo": rider.pop("rider_photo"),
+                "license_front": rider.pop("license_front"),
+                "license_back": rider.pop("license_back"),
+                "rc_front": rider.pop("rc_front"),
+                "rc_back": rider.pop("rc_back"),
+                "vehicle_photo": rider.pop("vehicle_photo")
+            }
+
+        pending_riders = [
+            rider for rider in all_riders
+            if rider["status"] == "Pending"
+        ]
+
+        return render_template(
+            "admin_dashboard.html",
+            orders=orders,
+            rider=all_riders[0] if all_riders else {},
+            riders=all_riders,
+            pending_riders=pending_riders
+        )
+
+    except mysql.connector.Error as err:
+        print("Admin dashboard database error:", err)
+        flash("Unable to load rider information.", "error")
+
+        return redirect(url_for("admin_login"))
+
+    finally:
+        cursor.close()
+        connection.close()
 
 
 # ---------------- APPROVE RIDER ----------------
+
 
 @app.route("/admin/approve/<int:rider_id>", methods=["POST"])
 @admin_required
 def approve_rider(rider_id):
 
-    for rider in riders.values():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
 
-        if rider["id"] == rider_id:
+    try:
+        cursor.execute(
+            "SELECT full_name FROM riders WHERE rider_id = %s",
+            (rider_id,)
+        )
 
-            rider["status"] = "Approved"
+        rider = cursor.fetchone()
+
+        if not rider:
+            flash("Rider not found.", "warning")
+
+        else:
+            cursor.execute("""
+                UPDATE riders
+                SET status = 'Approved'
+                WHERE rider_id = %s
+            """, (rider_id,))
+
+            connection.commit()
 
             flash(
-                f"{rider['name']} has been approved!",
+                f"{rider['full_name']} has been approved!",
                 "success"
             )
 
-            break
+    except mysql.connector.Error as err:
+        connection.rollback()
+        print("Approve rider database error:", err)
+        flash("Unable to approve rider.", "error")
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return redirect(url_for("admin_dashboard"))
 
 
+
 # ---------------- REJECT RIDER ----------------
+
 
 @app.route("/admin/reject/<int:rider_id>", methods=["POST"])
 @admin_required
 def reject_rider(rider_id):
 
-    for rider in riders.values():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
 
-        if rider["id"] == rider_id:
+    try:
+        cursor.execute(
+            "SELECT full_name FROM riders WHERE rider_id = %s",
+            (rider_id,)
+        )
 
-            rider["status"] = "Rejected"
+        rider = cursor.fetchone()
+
+        if not rider:
+            flash("Rider not found.", "warning")
+
+        else:
+            cursor.execute("""
+                UPDATE riders
+                SET status = 'Rejected'
+                WHERE rider_id = %s
+            """, (rider_id,))
+
+            connection.commit()
 
             flash(
-                f"{rider['name']} has been rejected.",
-                "warning"
+                f"{rider['full_name']} has been rejected.",
+                "success"
             )
 
-            break
+    except mysql.connector.Error as err:
+        connection.rollback()
+        print("Reject rider database error:", err)
+        flash("Unable to reject rider.", "error")
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return redirect(url_for("admin_dashboard"))
 
 
+
 # ---------------- RIDER DASHBOARD ----------------
+
 
 @app.route("/rider")
 @approved_required
@@ -646,22 +769,115 @@ def rider_dashboard():
 
     rider = current_rider()
 
+    if not rider:
+        return redirect(url_for("login"))
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        # Get only the orders assigned to the logged-in rider
+        cursor.execute("""
+            SELECT
+                ra.id AS assignment_id,
+                o.id AS id,
+                o.customer_name AS customer,
+                o.customer_phone AS phone,
+                o.customer_address AS address,
+                o.total_amount AS amount,
+
+                COALESCE(
+                    GROUP_CONCAT(
+                        DISTINCT CONCAT(p.name, ' x ', oi.quantity)
+                        SEPARATOR ', '
+                    ),
+                    'Order items'
+                ) AS item,
+
+                COALESCE(soa.status, 'Accepted') AS seller_status,
+
+                CASE
+                    WHEN ra.delivery_status = 'Assigned'
+                    THEN 'Pending'
+                    ELSE ra.delivery_status
+                END AS rider_status,
+
+                ra.rejection_reason AS rejection_reason
+
+            FROM rider_assignments ra
+
+            JOIN orders o
+                ON ra.order_id = o.id
+
+            JOIN riders r
+                ON ra.rider_id = r.rider_id
+
+            LEFT JOIN order_items oi
+                ON oi.order_id = o.id
+                AND oi.seller_id = ra.seller_id
+
+            LEFT JOIN products p
+                ON oi.product_id = p.id
+
+            LEFT JOIN seller_order_actions soa
+                ON soa.order_id = o.id
+                AND soa.seller_id = ra.seller_id
+
+            WHERE r.rider_id = %s
+
+            GROUP BY
+                ra.id,
+                o.id,
+                o.customer_name,
+                o.customer_phone,
+                o.customer_address,
+                o.total_amount,
+                soa.status,
+                ra.delivery_status,
+                ra.rejection_reason
+
+            ORDER BY ra.assigned_at DESC
+        """, (rider["id"],))
+
+        orders = cursor.fetchall()
+
+    finally:
+        cursor.close()
+        connection.close()
+
+    # Active orders assigned to this rider
     assigned_orders = [
         o for o in orders
-        if o["rider_status"] in ["Pending", "Accepted"]
+        if o["rider_status"] in [
+            "Pending", "Accepted", "Picked Up", "On the Way"
+        ]
     ]
 
+    # Completed deliveries
     delivery_history = [
         o for o in orders
         if o["rider_status"] == "Delivered"
     ]
 
+    # Dashboard statistics
     total_assigned = len(orders)
 
-    pending_count = sum(o["rider_status"] == "Pending" for o in orders)
-    accepted_count = sum(o["rider_status"] == "Accepted" for o in orders)
-    delivered_count = sum(o["rider_status"] == "Delivered" for o in orders)
-    rejected_count = sum(o["rider_status"] == "Rejected" for o in orders)
+    pending_count = sum(
+        o["rider_status"] == "Pending" for o in orders
+    )
+
+    accepted_count = sum(
+        o["rider_status"] in ["Accepted", "Picked Up", "On the Way"]
+        for o in orders
+    )
+
+    delivered_count = sum(
+        o["rider_status"] == "Delivered" for o in orders
+    )
+
+    rejected_count = sum(
+        o["rider_status"] == "Rejected" for o in orders
+    )
 
     success_rate = round(
         (delivered_count / total_assigned) * 100, 1
@@ -677,10 +893,13 @@ def rider_dashboard():
         ]
     }
 
-    total_order_value = sum(o["amount"] for o in orders)
+    total_order_value = sum(
+        float(o["amount"] or 0) for o in orders
+    )
 
     delivered_value = sum(
-        o["amount"] for o in orders
+        float(o["amount"] or 0)
+        for o in orders
         if o["rider_status"] == "Delivered"
     )
 
@@ -716,15 +935,32 @@ def rider_dashboard():
 
 # ---------------- ACCEPT ORDER ----------------
 
+
+# ---------------- ACCEPT ORDER ----------------
+
 @app.route("/accept/<int:order_id>", methods=["POST"])
 @approved_required
 def accept_order(order_id):
 
-    for order in orders:
+    rider = current_rider()
 
-        if order["id"] == order_id and order["rider_status"] == "Pending":
+    if not rider:
+        return redirect(url_for("login"))
 
-            order["rider_status"] = "Accepted"
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("""
+            UPDATE rider_assignments
+            SET delivery_status = 'Accepted'
+            WHERE order_id = %s
+              AND rider_id = %s
+              AND delivery_status = 'Assigned'
+        """, (order_id, rider["id"]))
+
+        if cursor.rowcount > 0:
+            connection.commit()
 
             notifications.insert(0, {
                 "title": "Order Accepted",
@@ -734,9 +970,23 @@ def accept_order(order_id):
 
             flash("Order accepted successfully!", "success")
 
-            break
+        else:
+            connection.rollback()
+            flash("This order is no longer available to accept.", "warning")
+
+    except mysql.connector.Error as err:
+        connection.rollback()
+        print("Accept order database error:", err)
+        flash("Unable to accept this order. Please try again.", "error")
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return redirect(url_for("assigned_orders"))
+
+
+# ---------------- REJECT ORDER ----------------
 
 
 # ---------------- REJECT ORDER ----------------
@@ -745,14 +995,32 @@ def accept_order(order_id):
 @approved_required
 def reject_order(order_id):
 
+    rider = current_rider()
+
+    if not rider:
+        return redirect(url_for("login"))
+
     reason = request.form.get("reason", "").strip()
 
-    for order in orders:
+    if not reason:
+        reason = "Not specified"
 
-        if order["id"] == order_id and order["rider_status"] == "Pending":
+    connection = get_db_connection()
+    cursor = connection.cursor()
 
-            order["rider_status"] = "Rejected"
-            order["rejection_reason"] = reason or "Not specified"
+    try:
+        cursor.execute("""
+            UPDATE rider_assignments
+            SET
+                delivery_status = 'Rejected',
+                rejection_reason = %s
+            WHERE order_id = %s
+              AND rider_id = %s
+              AND delivery_status = 'Assigned'
+        """, (reason, order_id, rider["id"]))
+
+        if cursor.rowcount > 0:
+            connection.commit()
 
             notifications.insert(0, {
                 "title": "Order Rejected",
@@ -760,9 +1028,20 @@ def reject_order(order_id):
                 "date": "Just now"
             })
 
-            flash("Order rejected.", "warning")
+            flash("Order rejected successfully.", "warning")
 
-            break
+        else:
+            connection.rollback()
+            flash("This order is no longer available to reject.", "warning")
+
+    except mysql.connector.Error as err:
+        connection.rollback()
+        print("Reject order database error:", err)
+        flash("Unable to reject this order. Please try again.", "error")
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return redirect(url_for("rider_dashboard"))
 
@@ -773,26 +1052,88 @@ def reject_order(order_id):
 @approved_required
 def deliver_order(order_id):
 
-    for order in orders:
+    rider = current_rider()
 
-        if order["id"] == order_id and order["rider_status"] == "Accepted":
+    if not rider:
+        return redirect(url_for("login"))
 
-            order["rider_status"] = "Delivered"
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    try:
+        # Step 1: Mark this rider's assignment as Delivered
+        cursor.execute("""
+            UPDATE rider_assignments
+            SET
+                delivery_status = 'Delivered',
+                delivered_at = NOW()
+            WHERE order_id = %s
+              AND rider_id = %s
+              AND delivery_status IN (
+                  'Accepted',
+                  'Picked Up',
+                  'On the Way'
+              )
+        """, (order_id, rider["id"]))
+
+        if cursor.rowcount > 0:
+
+            # Step 2: Check whether any assignments are still incomplete
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM rider_assignments
+                WHERE order_id = %s
+                  AND delivery_status NOT IN (
+                      'Delivered',
+                      'Rejected'
+                  )
+            """, (order_id,))
+
+            remaining_assignments = cursor.fetchone()[0]
+
+            # Step 3: Update the main order only when all assignments finish
+            if remaining_assignments == 0:
+                cursor.execute("""
+                    UPDATE orders
+                    SET order_status = 'Delivered'
+                    WHERE id = %s
+                """, (order_id,))
+
+            # Step 4: Save all database changes
+            connection.commit()
 
             notifications.insert(0, {
-                "title": "Delivery Completed",
-                "message": f"Order #{order_id} delivered successfully!",
+                "title": "Order Delivered",
+                "message": f"Order #{order_id} delivered successfully.",
                 "date": "Just now"
             })
 
-            flash(f"Order #{order_id} delivered successfully!", "success")
+            flash("Order delivered successfully!", "success")
 
-            break
+        else:
+            connection.rollback()
+            flash(
+                "This order cannot be marked as delivered.",
+                "warning"
+            )
+
+    except mysql.connector.Error as err:
+        connection.rollback()
+        print("Deliver order database error:", err)
+        flash(
+            "Unable to update delivery status. Please try again.",
+            "error"
+        )
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return redirect(url_for("rider_dashboard"))
 
 
 # ---------------- ASSIGNED ORDERS ----------------
+
 
 @app.route("/assigned-orders")
 @approved_required
@@ -800,10 +1141,83 @@ def assigned_orders():
 
     rider = current_rider()
 
-    assigned_orders_list = [
-        o for o in orders
-        if o["rider_status"] in ["Pending", "Accepted"]
-    ]
+    if not rider:
+        return redirect(url_for("login"))
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        cursor.execute("""
+            SELECT
+                ra.id AS assignment_id,
+                o.id AS id,
+                o.customer_name AS customer,
+                o.customer_phone AS phone,
+                o.customer_address AS address,
+                o.total_amount AS amount,
+
+                COALESCE(
+                    GROUP_CONCAT(
+                        DISTINCT CONCAT(p.name, ' x ', oi.quantity)
+                        SEPARATOR ', '
+                    ),
+                    'Order items'
+                ) AS item,
+
+                COALESCE(soa.status, 'Accepted') AS seller_status,
+
+                CASE
+                    WHEN ra.delivery_status = 'Assigned'
+                    THEN 'Pending'
+                    ELSE ra.delivery_status
+                END AS rider_status,
+
+                ra.rejection_reason
+
+            FROM rider_assignments ra
+
+            JOIN orders o
+                ON ra.order_id = o.id
+
+            LEFT JOIN order_items oi
+                ON oi.order_id = o.id
+                AND oi.seller_id = ra.seller_id
+
+            LEFT JOIN products p
+                ON oi.product_id = p.id
+
+            LEFT JOIN seller_order_actions soa
+                ON soa.order_id = o.id
+                AND soa.seller_id = ra.seller_id
+
+            WHERE ra.rider_id = %s
+              AND ra.delivery_status IN (
+                  'Assigned',
+                  'Accepted',
+                  'Picked Up',
+                  'On the Way'
+              )
+
+            GROUP BY
+                ra.id,
+                o.id,
+                o.customer_name,
+                o.customer_phone,
+                o.customer_address,
+                o.total_amount,
+                soa.status,
+                ra.delivery_status,
+                ra.rejection_reason
+
+            ORDER BY ra.assigned_at DESC
+        """, (rider["id"],))
+
+        assigned_orders_list = cursor.fetchall()
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return render_template(
         "assigned_orders.html",
@@ -811,8 +1225,8 @@ def assigned_orders():
         orders=assigned_orders_list
     )
 
-
 # ---------------- DELIVERY ANALYTICS ----------------
+
 
 @app.route("/delivery-analytics")
 @approved_required
@@ -820,12 +1234,72 @@ def delivery_analytics():
 
     rider = current_rider()
 
+    if not rider:
+        return redirect(url_for("login"))
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        cursor.execute("""
+            SELECT
+                ra.delivery_status AS rider_status,
+                o.total_amount AS amount,
+
+                COALESCE(
+                    GROUP_CONCAT(
+                        DISTINCT CONCAT(p.name, ' x ', oi.quantity)
+                        SEPARATOR ', '
+                    ),
+                    'Order items'
+                ) AS item
+
+            FROM rider_assignments ra
+
+            JOIN orders o
+                ON ra.order_id = o.id
+
+            LEFT JOIN order_items oi
+                ON oi.order_id = o.id
+                AND oi.seller_id = ra.seller_id
+
+            LEFT JOIN products p
+                ON oi.product_id = p.id
+
+            WHERE ra.rider_id = %s
+
+            GROUP BY
+                ra.id,
+                ra.delivery_status,
+                o.total_amount
+
+            ORDER BY ra.assigned_at DESC
+        """, (rider["id"],))
+
+        orders = cursor.fetchall()
+
+    finally:
+        cursor.close()
+        connection.close()
+
     total_assigned = len(orders)
 
-    pending_count = sum(o["rider_status"] == "Pending" for o in orders)
-    accepted_count = sum(o["rider_status"] == "Accepted" for o in orders)
-    delivered_count = sum(o["rider_status"] == "Delivered" for o in orders)
-    rejected_count = sum(o["rider_status"] == "Rejected" for o in orders)
+    pending_count = sum(
+        o["rider_status"] == "Assigned" for o in orders
+    )
+
+    accepted_count = sum(
+        o["rider_status"] in ["Accepted", "Picked Up", "On the Way"]
+        for o in orders
+    )
+
+    delivered_count = sum(
+        o["rider_status"] == "Delivered" for o in orders
+    )
+
+    rejected_count = sum(
+        o["rider_status"] == "Rejected" for o in orders
+    )
 
     success_rate = round(
         (delivered_count / total_assigned) * 100, 1
@@ -841,10 +1315,13 @@ def delivery_analytics():
         ]
     }
 
-    total_order_value = sum(o["amount"] for o in orders)
+    total_order_value = sum(
+        float(o["amount"] or 0) for o in orders
+    )
 
     delivered_value = sum(
-        o["amount"] for o in orders
+        float(o["amount"] or 0)
+        for o in orders
         if o["rider_status"] == "Delivered"
     )
 
@@ -870,28 +1347,70 @@ def delivery_analytics():
     )
 
 
+
 # ---------------- RIDER PROFILE ----------------
 
 @app.route("/rider-profile", methods=["GET", "POST"])
 @approved_required
-def rider_profile():
 
+def rider_profile():
     rider = current_rider()
 
+    if not rider:
+        return redirect(url_for("login"))
+
     if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        phone = request.form.get("phone", "").strip()
+        vehicle = request.form.get("vehicle", "").strip()
 
-        rider["name"] = request.form["name"]
-        rider["phone"] = request.form["phone"]
-        rider["vehicle"] = request.form["vehicle"]
+        if not name or not phone or not vehicle:
+            flash("Please fill in all profile fields.", "warning")
+            return redirect(url_for("rider_profile"))
 
-        flash("Profile updated successfully!")
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        try:
+            cursor.execute("""
+                UPDATE riders
+                SET
+                    full_name = %s,
+                    phone = %s,
+                    vehicle_number = %s
+                WHERE rider_id = %s
+            """, (name, phone, vehicle, rider["id"]))
+
+            connection.commit()
+
+            flash("Profile updated successfully!", "success")
+
+        except mysql.connector.IntegrityError:
+            connection.rollback()
+            flash(
+                "This phone number or vehicle number is already registered.",
+                "error"
+            )
+
+        except mysql.connector.Error as err:
+            connection.rollback()
+            print("Profile update database error:", err)
+            flash("Unable to update profile. Please try again.", "error")
+
+        finally:
+            cursor.close()
+            connection.close()
 
         return redirect(url_for("rider_profile"))
 
-    return render_template("rider_profile.html", rider=rider)
+    return render_template(
+        "rider_profile.html",
+        rider=rider
+    )
 
 
 # ---------------- ORDER HISTORY ----------------
+
 
 @app.route("/order-history")
 @approved_required
@@ -899,16 +1418,83 @@ def order_history():
 
     rider = current_rider()
 
-    delivery_history = [
-        o for o in orders
-        if o["rider_status"] == "Delivered"
-    ]
+    if not rider:
+        return redirect(url_for("login"))
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        cursor.execute("""
+            SELECT
+                ra.id AS assignment_id,
+                o.id AS id,
+                o.customer_name AS customer,
+                o.customer_phone AS phone,
+                o.customer_address AS address,
+                o.total_amount AS amount,
+
+                COALESCE(
+                    GROUP_CONCAT(
+                        DISTINCT CONCAT(p.name, ' x ', oi.quantity)
+                        SEPARATOR ', '
+                    ),
+                    'Order items'
+                ) AS item,
+
+                COALESCE(soa.status, 'Accepted') AS seller_status,
+                ra.delivery_status AS rider_status,
+                ra.rejection_reason,
+                ra.assigned_at,
+                ra.delivered_at
+
+            FROM rider_assignments ra
+
+            JOIN orders o
+                ON ra.order_id = o.id
+
+            LEFT JOIN order_items oi
+                ON oi.order_id = o.id
+                AND oi.seller_id = ra.seller_id
+
+            LEFT JOIN products p
+                ON oi.product_id = p.id
+
+            LEFT JOIN seller_order_actions soa
+                ON soa.order_id = o.id
+                AND soa.seller_id = ra.seller_id
+
+            WHERE ra.rider_id = %s
+              AND ra.delivery_status = 'Delivered'
+
+            GROUP BY
+                ra.id,
+                o.id,
+                o.customer_name,
+                o.customer_phone,
+                o.customer_address,
+                o.total_amount,
+                soa.status,
+                ra.delivery_status,
+                ra.rejection_reason,
+                ra.assigned_at,
+                ra.delivered_at
+
+            ORDER BY ra.delivered_at DESC
+        """, (rider["id"],))
+
+        delivery_history = cursor.fetchall()
+
+    finally:
+        cursor.close()
+        connection.close()
 
     return render_template(
         "order_history.html",
         rider=rider,
         history=delivery_history
     )
+
 
 
 # ---------------- RIDER NOTIFICATIONS ----------------
@@ -929,4 +1515,4 @@ def rider_notifications():
 # ---------------- RUN APPLICATION ----------------
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=5001)

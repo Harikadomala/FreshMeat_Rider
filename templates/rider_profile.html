@@ -7,282 +7,95 @@
 
 <title>FreshMeat | My Profile</title>
 
-<style>
-*{box-sizing:border-box}
-
-body{
-    margin:0;
-    font-family:Arial,sans-serif;
-    background:#f4f6fa;
-    color:#263247;
-}
-
-.sidebar{
-    width:260px;
-    background:#172b4d;
-    color:white;
-    position:fixed;
-    inset:0 auto 0 0;
-    height:100vh;
-    padding:27px 18px;
-}
-
-.brand{
-    display:flex;
-    align-items:center;
-    gap:12px;
-    margin:5px 8px 38px;
-}
-
-.brand-icon{
-    width:46px;
-    height:46px;
-    border-radius:13px;
-    background:#f36b35;
-    display:grid;
-    place-items:center;
-    font-size:25px;
-    font-weight:bold;
-}
-
-.brand-name{font-size:21px;font-weight:700}
-
-.portal{
-    font-size:10px;
-    letter-spacing:2px;
-    color:#bdc9d9;
-    margin-top:4px;
-}
-
-.nav-heading{
-    font-size:10px;
-    letter-spacing:1.8px;
-    color:#93a5bf;
-    margin:24px 10px 10px;
-}
-
-.sidebar a{
-    display:block;
-    padding:14px 13px;
-    color:#dce5f1;
-    text-decoration:none;
-    border-radius:8px;
-    margin:5px 0;
-    font-size:14px;
-}
-
-.sidebar a:hover,.sidebar a.active{
-    background:#f36b35;
-    color:white;
-}
-
-.rider-info{
-    position:absolute;
-    bottom:22px;
-    left:25px;
-    line-height:1.7;
-    color:#dce5f1;
-    font-size:13px;
-}
-
-.main{
-    margin-left:260px;
-    padding:30px 34px;
-}
-
-.topbar{margin-bottom:25px}
-
-.topbar h2{
-    margin:0 0 8px;
-    font-size:26px;
-}
-
-.section{
-    background:white;
-    padding:25px;
-    border-radius:13px;
-    box-shadow:0 3px 14px #172b4d0a;
-    margin-bottom:23px;
-}
-
-.section h2{margin:0 0 8px}
-
-.section-sub{
-    color:#8490a2;
-    font-size:13px;
-    margin-bottom:25px;
-}
-
-.profile-header{
-    display:flex;
-    align-items:center;
-    gap:20px;
-    padding-bottom:25px;
-    border-bottom:1px solid #edf0f4;
-    margin-bottom:20px;
-}
-
-.avatar{
-    width:75px;
-    height:75px;
-    border-radius:50%;
-    background:#fbe6dc;
-    color:#c45b31;
-    display:grid;
-    place-items:center;
-    font-size:30px;
-    font-weight:bold;
-}
-
-.profile-header h2{margin:0 0 8px}
-
-.profile-header p{
-    color:#8490a2;
-    margin:0;
-    font-size:13px;
-}
-
-.profile-grid{
-    display:grid;
-    grid-template-columns:repeat(2,1fr);
-    gap:17px;
-}
-
-.profile-item{
-    background:#f8f9fb;
-    padding:17px;
-    border-radius:9px;
-}
-
-.profile-item small{
-    display:block;
-    color:#8490a2;
-    font-size:11px;
-    margin-bottom:9px;
-}
-
-.profile-item strong{font-size:14px}
-
-.status{
-    display:inline-block;
-    padding:7px 12px;
-    border-radius:20px;
-    background:#def5e6;
-    color:#18783e;
-    font-size:11px;
-    font-weight:bold;
-}
-
-/* Edit button */
-
-.edit-btn{
-    background:#f36b35;
-    color:white;
-    border:none;
-    padding:11px 20px;
-    border-radius:7px;
-    cursor:pointer;
-    font-size:13px;
-    font-weight:bold;
-}
-
-.edit-btn:hover{background:#dc5927}
-
-.profile-top{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    margin-bottom:20px;
-}
-
-/* Edit form */
-
-.edit-form{
-    display:none;
-    margin-top:25px;
-    border-top:1px solid #edf0f4;
-    padding-top:22px;
-}
-
-.edit-form.show{display:block}
-
-.form-grid{
-    display:grid;
-    grid-template-columns:repeat(2,1fr);
-    gap:18px;
-}
-
-.form-group label{
-    display:block;
-    font-size:12px;
-    font-weight:bold;
-    margin-bottom:8px;
-}
-
-.form-group input{
-    width:100%;
-    padding:12px;
-    border:1px solid #dce1e9;
-    border-radius:7px;
-    outline:none;
-    font-size:14px;
-}
-
-.form-group input:focus{
-    border-color:#f36b35;
-}
-
-.form-actions{
-    display:flex;
-    gap:10px;
-    margin-top:22px;
-}
-
-.save-btn{
-    background:#172b4d;
-    color:white;
-    border:none;
-    padding:11px 22px;
-    border-radius:7px;
-    cursor:pointer;
-}
-
-.cancel-btn{
-    background:#e9edf3;
-    color:#263247;
-    border:none;
-    padding:11px 22px;
-    border-radius:7px;
-    cursor:pointer;
-}
-
-@media(max-width:650px){
-    .sidebar{
-        width:100%;
-        height:auto;
-        position:relative;
-    }
-
-    .rider-info{display:none}
-
-    .main{
-        margin:0;
-        padding:17px;
-    }
-
-    .profile-grid,.form-grid{
-        grid-template-columns:1fr;
-    }
-
-    .profile-top{
-        align-items:flex-start;
-        gap:12px;
-    }
-}
-</style>
+<link rel="stylesheet" href="{{ url_for('static', filename='portal_theme.css') }}">
 </head>
 
 <body>
+
+<!-- BIKE RIDING INTRO SPLASH (LEFT TO RIGHT -> OPENS WEBSITE) -->
+<div id="fmBikeSplash" class="fm-bike-splash" aria-hidden="true">
+  <div class="fm-splash-brand">
+    <div class="fm-splash-badge">F</div>
+    <div class="fm-splash-title">FreshMeat</div>
+  </div>
+  <div class="fm-splash-sub">Delivery Partner Portal &bull; Express Dispatch</div>
+
+  <div class="fm-road-stage">
+    <div class="fm-road-line"></div>
+    <div class="fm-road-dashes"></div>
+
+    <div class="fm-bike-runner">
+      <svg class="fm-bike-svg" viewBox="0 0 240 130" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <g class="fm-speed-streak" stroke="#f3b587" stroke-width="2.5" stroke-linecap="round">
+          <line x1="6" y1="54" x2="36" y2="54"/>
+          <line x1="14" y1="68" x2="46" y2="68"/>
+          <line x1="2" y1="82" x2="30" y2="82" stroke="#f8f6ef" opacity="0.7"/>
+        </g>
+        <!-- FreshMeat Insulated Delivery Box -->
+        <rect x="48" y="42" width="42" height="34" rx="7" fill="#c87843" stroke="#f8f6ef" stroke-width="2"/>
+        <rect x="53" y="48" width="32" height="10" rx="3" fill="#173728"/>
+        <text x="69" y="55.5" fill="#f8f6ef" font-size="6.5" font-weight="800" text-anchor="middle" font-family="sans-serif">FRESH</text>
+        <!-- Rider Body & Jacket -->
+        <path d="M98 44 C106 42, 118 47, 124 58 L116 74 L94 72 Z" fill="#f8f6ef"/>
+        <path d="M114 50 L142 56" stroke="#f8f6ef" stroke-width="6.5" stroke-linecap="round"/>
+        <circle cx="144" cy="56" r="3.5" fill="#c87843"/>
+        <path d="M98 71 L112 86 L106 102" stroke="#173728" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- Helmet -->
+        <circle cx="111" cy="29" r="13" fill="#c87843" stroke="#f8f6ef" stroke-width="2"/>
+        <path d="M113 24 L124 27 C124 32, 119 35, 113 34 Z" fill="#173728"/>
+        <!-- Bike Frame & Fork -->
+        <path d="M68 98 L96 75 L136 75 L154 62" stroke="#e8e6dc" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M94 75 L112 96 L138 96" stroke="#c87843" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <line x1="146" y1="53" x2="174" y2="98" stroke="#f8f6ef" stroke-width="4.5" stroke-linecap="round"/>
+        <!-- Headlight Beam -->
+        <polygon points="164,56 232,42 232,76 164,64" fill="url(#fmHeadlightGrad)" opacity="0.45"/>
+        <rect x="155" y="54" width="10" height="9" rx="3" fill="#fff7d6"/>
+        <!-- Exhaust -->
+        <circle cx="38" cy="95" r="4" fill="#f8f6ef" opacity="0.45"/>
+        <circle cx="26" cy="92" r="5.5" fill="#f8f6ef" opacity="0.25"/>
+        <!-- Rear Wheel -->
+        <g class="fm-wheel-spin">
+          <circle cx="68" cy="98" r="21" fill="#173728" stroke="#f8f6ef" stroke-width="4"/>
+          <circle cx="68" cy="98" r="9" fill="#c87843"/>
+          <line x1="68" y1="79" x2="68" y2="117" stroke="#e8e6dc" stroke-width="1.8"/>
+          <line x1="49" y1="98" x2="87" y2="98" stroke="#e8e6dc" stroke-width="1.8"/>
+        </g>
+        <!-- Front Wheel -->
+        <g class="fm-wheel-spin">
+          <circle cx="174" cy="98" r="21" fill="#173728" stroke="#f8f6ef" stroke-width="4"/>
+          <circle cx="174" cy="98" r="9" fill="#c87843"/>
+          <line x1="174" y1="79" x2="174" y2="117" stroke="#e8e6dc" stroke-width="1.8"/>
+          <line x1="155" y1="98" x2="193" y2="98" stroke="#e8e6dc" stroke-width="1.8"/>
+        </g>
+        <defs>
+          <linearGradient id="fmHeadlightGrad" x1="164" y1="60" x2="232" y2="60" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#fff4c2" stop-opacity="0.9"/>
+            <stop offset="100%" stop-color="#fff4c2" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  </div>
+
+  <div class="fm-splash-progress">
+    <div class="fm-splash-bar"></div>
+  </div>
+</div>
+<script>
+(function() {
+  function dismissBikeSplash() {
+    var splash = document.getElementById('fmBikeSplash');
+    if (splash && !splash.classList.contains('is-done')) {
+      splash.classList.add('is-done');
+    }
+  }
+  window.addEventListener('DOMContentLoaded', function() {
+    setTimeout(dismissBikeSplash, 1400);
+  });
+  setTimeout(dismissBikeSplash, 2000);
+})();
+</script>
+
 
 <aside class="sidebar">
 

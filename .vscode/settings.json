@@ -29,5 +29,6 @@
             "database": "freshmeat",
             "username": "root"
         }
-    ]
+    ],
+    "python.terminal.useEnvFile": true
 }
